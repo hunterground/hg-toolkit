@@ -79,6 +79,9 @@ def _apply_flag(spec: dict, body: dict) -> None:
     if kind == "regex":
         raise ToolError("the platform does not accept regex flags")
     if kind == "static":
+        if body["requires_instance"]:
+            raise ToolError("a static flag is only valid on a static challenge")
+
         content = flag.get("content")
         if not isinstance(content, str) or not content:
             raise ToolError("static flag needs content")

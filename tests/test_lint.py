@@ -8,6 +8,16 @@ from hg.scaffold    import create_challenge
 import yaml
 
 
+_DYNAMIC_FLAG = {
+    "id":      "flag",
+    "type":    "dynamic",
+    "path":    "/flag",
+    "owner":   "root:root",
+    "mode":    "0400",
+    "service": "web",
+}
+
+
 ## Helper Functions ----------------------------------------------------------------------
 def _scaffold(tmp_path):
     return create_challenge("web-nginx", "web-xss-01", tmp_path / "web-xss-01")
@@ -59,6 +69,32 @@ def test_lint_rejects_flag_content(tmp_path):
     _write_manifest(root, manifest)
     errors = lint_challenge(root)
     assert any("content" in error for error in errors)
+
+
+def test_lint_rejects_a_static_flag_on_an_instance(tmp_path):
+    root = _scaffold(tmp_path)
+    manifest = _manifest(root)
+    for kind in ("static", "regex"):
+        manifest["spec"]["flags"] = [{"id": "flag", "type": kind, "content": "hg{fixed}"}]
+        _write_manifest(root, manifest)
+        errors = lint_challenge(root)
+        assert any("must be dynamic" in error for error in errors), kind
+        assert any("static challenge" in error for error in errors), kind
+        assert not any("path" in error for error in errors), kind
+
+
+def test_lint_rejects_a_dynamic_flag_on_a_static_challenge(tmp_path):
+    root = create_challenge(
+        challenge_id = "forensic-note-01",
+        dest         = tmp_path / "forensic-note-01",
+        category     = "forensic",
+    )
+    manifest = _manifest(root)
+    manifest["spec"]["flags"] = [_DYNAMIC_FLAG]
+    _write_manifest(root, manifest)
+    errors = lint_challenge(root)
+    assert any("static or regex" in error for error in errors)
+    assert not any("content is required" in error for error in errors)
 
 
 def test_lint_accepts_a_static_password(tmp_path):

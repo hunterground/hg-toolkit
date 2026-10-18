@@ -520,6 +520,10 @@ def _check_networks(spec: dict, members: list[dict], errors: list[str]) -> None:
 
 
 def _check_flags(spec: dict, names: set[str], runtime: str, errors: list[str]) -> None:
+    """
+    An instance (container or scenario) accept only dynamic flags.
+    A static or regex flag is valid only when the runtime is static.
+    """
     flags = spec.get("flags")
     if not isinstance(flags, list):
         return
@@ -540,26 +544,36 @@ def _check_flags(spec: dict, names: set[str], runtime: str, errors: list[str]) -
         if runtime == "static":
             if kind not in ("static", "regex"):
                 errors.append(f"spec.flags[{index}].type must be static or regex")
-            if not isinstance(flag.get("content"), str) or not flag.get("content"):
+                continue
+
+            content = flag.get("content")
+            if not isinstance(content, str) or not content:
                 errors.append(f"spec.flags[{index}].content is required")
-            if kind == "regex" and isinstance(flag.get("content"), str):
+            if kind == "regex" and isinstance(content, str):
                 try:
-                    re.compile(flag["content"])
+                    re.compile(content)
                 except re.error:
                     errors.append(f"spec.flags[{index}].content is not a regex")
             continue
 
+        # runtime is container or scenario
         if kind != "dynamic":
-            errors.append(f"spec.flags[{index}].type must be dynamic")
+            errors.append(
+                f"spec.flags[{index}].type must be dynamic; "
+                "a static flag is only valid on a static challenge"
+            )
+            continue
         if "content" in flag:
             errors.append(f"spec.flags[{index}] must not set content")
 
-        path = flag.get("path")
+        path  = flag.get("path")
+        owner = flag.get("owner")
+        mode  = flag.get("mode")
         if not isinstance(path, str) or not path.startswith("/") or ".." in Path(path).parts:
             errors.append(f"spec.flags[{index}].path must be absolute")
-        if not isinstance(flag.get("owner"), str) or not _OWNER.fullmatch(flag.get("owner") or ""):
+        if not isinstance(owner, str) or not _OWNER.fullmatch(owner or ""):
             errors.append(f"spec.flags[{index}].owner must be user:group")
-        if not isinstance(flag.get("mode"), str) or not _MODE.fullmatch(flag.get("mode") or ""):
+        if not isinstance(mode, str) or not _MODE.fullmatch(mode or ""):
             errors.append(f"spec.flags[{index}].mode must be a four-digit octal mode")
 
         service = flag.get("service")

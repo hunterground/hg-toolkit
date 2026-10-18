@@ -410,6 +410,12 @@ def test_push_mapping_fails_closed(tmp_path):
         challenge_body(root)
 
     spec = _service_spec()
+    spec["flags"] = [{"id": "flag", "type": "static", "content": "flag{fixed}"}]
+    _write_manifest(root, spec)
+    with pytest.raises(ToolError, match="static challenge"):
+        challenge_body(root)
+
+    spec = _service_spec()
     spec["runtime"] = "static"
     spec.pop("services")
     spec.pop("spawn")
