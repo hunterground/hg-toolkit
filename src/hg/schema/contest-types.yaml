@@ -1,0 +1,38 @@
+# Contest type table.
+#
+# Maps a contest type to the platform contest fields (kind, mode) and to the
+# participation values the type allows. Kinds match the backend enum:
+# open, mini_open, public, private, hiring_test.
+#
+#   participation   default sent when metadata.participation is omitted
+#   participations  values this type accepts. A single value means fixed.
+
+open:
+  kind: open
+  mode: jeopardy
+  participation: individual
+  participations: [individual]
+
+mini-open:
+  kind: mini_open
+  mode: jeopardy
+  participation: individual
+  participations: [individual]
+
+public-competition:
+  kind: public
+  mode: jeopardy
+  participation: individual
+  participations: [individual, team]
+
+private-competition:
+  kind: private
+  mode: jeopardy
+  participation: individual
+  participations: [individual, team]
+
+hiring-test:
+  kind: hiring_test
+  mode: jeopardy
+  participation: individual
+  participations: [individual, team]

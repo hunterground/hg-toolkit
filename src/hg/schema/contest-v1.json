@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hunterground.local/schema/contest-v1.json",
+  "title": "HunterGround contest manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "hg.contest/v1" },
+    "kind": { "const": "Contest" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "spec": { "$ref": "#/$defs/spec" }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "description", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "rules": { "type": "string" },
+        "type": {
+          "enum": ["open", "mini-open", "public-competition", "private-competition", "hiring-test"]
+        },
+        "participation": { "enum": ["individual", "team"] }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startsAt", "endsAt", "visibility"],
+      "properties": {
+        "startsAt": { "type": "string", "minLength": 1 },
+        "endsAt": { "type": "string", "minLength": 1 },
+        "visibility": { "enum": ["draft", "published"] },
+        "challenges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/challenge" }
+        }
+      }
+    },
+    "challenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "points": { "type": "integer", "minimum": 0 },
+        "sortOrder": { "type": "integer", "minimum": 0 },
+        "state": { "enum": ["visible", "hidden"] }
+      }
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    }
+  }
+}
