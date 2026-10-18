@@ -788,6 +788,15 @@ def _wait_until(predicate: Callable[[], bool], timeout: float, message: str) -> 
         time.sleep(0.2)
 
 
+def check_health(probe: HealthProbe, run: Runner | None = None) -> bool:
+    """Try the player health check once. True when the entry answers."""
+    try:
+        wait_health(probe, run or quiet_runner, timeout=0)
+    except ToolError:
+        return False
+    return True
+
+
 def wait_health(probe: HealthProbe, run: Runner, timeout: float = 60) -> None:
     if probe.kind == "http" and probe.host and probe.port:
         path = probe.path or "/"

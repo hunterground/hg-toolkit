@@ -7,6 +7,7 @@ from hg.build       import build_challenge, host_platform
 from hg.errors      import ToolError
 from hg.scaffold    import create_challenge
 import pytest
+import yaml
 
 
 ## Helper Functions ----------------------------------------------------------------------
@@ -44,10 +45,12 @@ def test_build_argv_loads_the_host_platform_and_catalog_tag(tmp_path):
     assert len(builds) == 1
 
     argv = builds[0]
+    digest = yaml.safe_load((root / "challenge.yaml").read_text(encoding="utf-8"))
+    digest = digest["spec"]["services"][0]["build"]["fromDigest"]
     assert "--load" in argv
     assert argv[argv.index("--platform") + 1] == host_platform()
     assert argv[argv.index("--tag") + 1] == "challenges/web/web-xss-01:local"
-    assert "BASE_WEB_NGINX_IMAGE=base/web-nginx:latest" in argv
+    assert f"BASE_WEB_NGINX_IMAGE=hunterground/base-web-nginx@{digest}" in argv
     assert tags == ["challenges/web/web-xss-01:local"]
 
 
@@ -60,8 +63,10 @@ def test_range_build_inspects_the_pack_and_passes_both_args(tmp_path):
     assert inspected == ["range/debian:latest", "range/pack/sshd:latest"]
 
     builds = [argv for argv in calls if "buildx" in argv]
+    digest = yaml.safe_load((root / "challenge.yaml").read_text(encoding="utf-8"))
+    digest = digest["spec"]["hosts"][0]["build"]["fromDigest"]
     assert len(builds) == 1
-    assert "RANGE_DEBIAN_IMAGE=range/debian:latest" in builds[0]
+    assert f"RANGE_DEBIAN_IMAGE=hunterground/range-debian@{digest}" in builds[0]
     assert "RANGE_PACK_SSHD_IMAGE=range/pack/sshd:latest" in builds[0]
     assert builds[0][builds[0].index("--tag") + 1] == "challenges/range/range-debian-01:local"
     assert tags == ["challenges/range/range-debian-01:local"]

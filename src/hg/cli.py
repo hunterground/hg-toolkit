@@ -57,6 +57,7 @@ from hg.remote          import (
 )
 from hg.run             import run_challenge, stop_challenge
 from hg.scaffold        import create_challenge
+from hg.status          import status_challenge
 from hg.solve           import solve_challenge
 from hg.state           import write_state
 from hg                 import style
@@ -540,6 +541,41 @@ def _cmd_verify(args: argparse.Namespace) -> None:
     verify_challenge(root, timeout=args.timeout)
     style.ok("verified")
 
+def _cmd_status(args: argparse.Namespace) -> None:
+    root = challenge_root(Path(args.path) if args.path else None)
+    report = status_challenge(root)
+    rows: list[tuple[object, ...]] = [
+        (style.dim("status"), style.value(report.summary), style.dim(report.challenge_id)),
+    ]
+    if report.connection:
+        rows.append((style.dim("connection"), style.value(report.connection)))
+    for flag_id, content in report.flags:
+        rows.append((style.dim("flag"), style.label(flag_id), style.value(content)))
+    for who, password in report.users:
+        rows.append((style.dim("user"), style.dim(who), style.value(password)))
+    for container in report.containers:
+        state = style.success(container.state) if container.state == "running" else style.dim(container.state)
+        rows.append((
+            style.dim("container"),
+            style.dim(container.name),
+            style.dim(container.image),
+            state,
+            style.dim(container.detail),
+            style.dim(container.ports),
+        ))
+    for name, present in report.networks:
+        rows.append((style.dim("network"), style.dim(name), style.dim("present" if present else "missing")))
+    if report.health:
+        health = style.success(report.health) if report.health == "ok" else style.dim(report.health)
+        rows.append((style.dim("health"), health))
+    if rows:
+        style.table(rows)
+    for warning in report.warnings:
+        style.warn(warning)
+    if not report.ok:
+        sys.exit(1)
+
+
 def _cmd_stop(args: argparse.Namespace) -> None:
     root = challenge_root(Path(args.path) if args.path else None)
     for name in stop_challenge(root):
@@ -888,7 +924,7 @@ def build_parser() -> _HelpParser:
     scaffold = challenge_sub.add_parser(
         "scaffold",
         help    = "Write a new challenge tree",
-        summary = "Write a new challenge tree from a base image.",
+        summary = "Write a new challenge tree from a base image and pin its digest.",
         example = "hg challenge scaffold --base web-nginx --id web-xss-01 --dest ../web-xss-01",
         section = "Author",
     )
@@ -952,6 +988,17 @@ def build_parser() -> _HelpParser:
         help    = "Seconds to wait until the player entry is healthy. Defaults to 60",
     )
     run.set_defaults(func=_cmd_run)
+
+    ## hg challenge status
+    status = challenge_sub.add_parser(
+        "status",
+        help    = "Show whether the local challenge is running",
+        summary = "Show whether the challenge containers are running.",
+        example = "hg challenge status --path ../web-xss-01",
+        section = "Run",
+    )
+    _flag(status, "--path", completer=directories, help=_CHALLENGE_PATH)
+    status.set_defaults(func=_cmd_status)
 
     ## hg challenge verify
     verify = challenge_sub.add_parser(

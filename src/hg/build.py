@@ -80,8 +80,11 @@ def _build_args(info, base, digest: str | None) -> list[str]:
         if key not in declared:
             continue
         if digest and key == primary:
+            # The digest belongs to the hub repo. A bare name such as
+            # base/web-flask@sha256:… is docker.io/base/web-flask, which
+            # does not exist, so the pull is denied.
             name = value.split(":", 1)[0]
-            value = f"{name}@{digest}"
+            value = f"{hub_ref(name)}@{digest}"
         args.append(f"{key}={value}")
     return args
 

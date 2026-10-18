@@ -5,10 +5,15 @@
 
 from hg.errors      import ToolError
 from hg.lint        import lint_challenge, parse_dockerfile
-from hg.scaffold    import create_challenge, repo_root
+from hg.scaffold    import base_digest, create_challenge, repo_root
 import stat
+import subprocess
 import pytest
 import yaml
+
+
+# Same value tests/conftest.py returns from the stubbed digest lookup.
+STUB_DIGEST = "sha256:" + ("ab" * 32)
 
 
 TEMPLATES = [
@@ -143,6 +148,7 @@ def test_scaffold_writes_a_tree_that_lints(tmp_path, base, challenge_id, context
     members = manifest["spec"].get("services") or manifest["spec"].get("hosts")
     assert len(members) == 1
     assert members[0]["image"]["name"] == f"challenges/{manifest['metadata']['category']}/{challenge_id}"
+    assert members[0]["build"]["fromDigest"] == STUB_DIGEST
     assert lint_challenge(dest) == []
 
 
@@ -166,6 +172,42 @@ def test_tcp_and_range_connection_text(tmp_path):
     assert "openssh-server" in dockerfile
     assert "hg-enable sshd && hg-seal" in dockerfile
     assert "RANGE_PACK_SSHD_IMAGE=range/pack/sshd:latest" in dockerfile
+
+
+def test_base_digest_reads_the_index_digest(monkeypatch):
+    seen = []
+
+    def run(argv, **_kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=STUB_DIGEST + "\n", stderr="")
+
+    monkeypatch.setattr("hg.scaffold.subprocess.run", run)
+    assert base_digest("base/web-nginx:latest") == STUB_DIGEST
+    assert seen == [[
+        "docker", "buildx", "imagetools", "inspect",
+        "--format", "{{.Manifest.Digest}}",
+        "hunterground/base-web-nginx:latest",
+    ]]
+
+
+def test_base_digest_reports_a_failed_inspect(monkeypatch):
+    def run(argv, **_kwargs):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="no such manifest")
+
+    monkeypatch.setattr("hg.scaffold.subprocess.run", run)
+    with pytest.raises(ToolError, match="cannot read digest of hunterground/base-web-nginx:latest"):
+        base_digest("base/web-nginx:latest")
+
+
+def test_scaffold_refuses_when_the_digest_cannot_be_read(tmp_path, monkeypatch):
+    def fail(_tag):
+        raise ToolError("cannot read digest of hunterground/base-web-nginx:latest")
+
+    monkeypatch.setattr("hg.scaffold.base_digest", fail)
+    dest = tmp_path / "out"
+    with pytest.raises(ToolError, match="digest"):
+        create_challenge("web-nginx", "web-xss-01", dest)
+    assert not dest.exists()
 
 
 def test_scaffold_refuses_a_bad_id(tmp_path):

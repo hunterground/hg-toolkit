@@ -80,10 +80,11 @@ def test_lint_allows_a_builder_stage(tmp_path):
     assert lint_challenge(root) == []
 
 
-def test_strict_requires_digest_and_real_private_files(tmp_path):
+def test_strict_requires_real_private_files(tmp_path):
     root = create_challenge("web-nginx", "web-xss-01", tmp_path / "web-xss-01")
+    assert _manifest(root)["spec"]["services"][0]["build"]["fromDigest"] == DIGEST
     errors = lint_challenge(root, strict=True)
-    assert any("fromDigest" in error for error in errors)
+    assert not any("fromDigest" in error for error in errors)
     assert any("writeup.md is still the scaffold stub" in error for error in errors)
     assert any("solve.sh is still the scaffold stub" in error for error in errors)
 
@@ -112,7 +113,7 @@ def test_build_uses_from_digest(tmp_path):
     calls = []
     build_challenge(root, _runner(calls))
     builds = [argv for argv in calls if "buildx" in argv]
-    assert f"BASE_WEB_NGINX_IMAGE=base/web-nginx@{DIGEST}" in builds[0]
+    assert f"BASE_WEB_NGINX_IMAGE=hunterground/base-web-nginx@{DIGEST}" in builds[0]
 
 
 def test_sidecar_is_inspected_and_not_built(tmp_path):

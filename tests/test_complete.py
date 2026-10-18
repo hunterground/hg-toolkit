@@ -41,7 +41,7 @@ def _answers(tokens, current):
 def test_every_command_is_offered():
     assert _answers(["hg"], "contest") == ["contest"]
     assert _answers(["hg", "challenge"], "") == [
-        "scaffold", "lint", "digest", "build", "run", "verify", "solve", "stop", "clean", "push", "material",
+        "scaffold", "lint", "digest", "build", "run", "status", "verify", "solve", "stop", "clean", "push", "material",
     ]
 
 def test_a_group_offers_its_subcommands_and_nothing_else():

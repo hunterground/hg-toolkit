@@ -3,11 +3,14 @@ Challenge Scaffolder
 Write a challenge tree from a catalog base.
 """
 
+from collections.abc        import Callable
 from importlib.resources    import as_file, files
 from pathlib                import Path
-from hg.catalog             import ID_HINT, ID_RE, Base, challenge_image_name, require_template
+from hg.catalog             import ID_HINT, ID_RE, Base, challenge_image_name, hub_ref, require_template
 from hg.errors              import ToolError
+import re
 import shutil
+import subprocess
 import yaml
 
 
@@ -25,6 +28,9 @@ SOLVE_SH = """#!/bin/sh
 echo "solve.sh is a stub" >&2
 exit 1
 """
+
+# Same shape the schema requires for build.fromDigest.
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 ## Helper Functions ------------------------------------------------------------
@@ -60,7 +66,35 @@ def ensure_new_dir(dest: Path) -> None:
             raise ToolError(f"destination is not empty: {dest}")
 
 
-def _manifest(base: Base, challenge_id: str, title: str, author: str) -> dict:
+def base_digest(tag: str) -> str:
+    """
+    Manifest-list digest of a catalog image on Docker Hub.
+
+    `imagetools inspect` reports the index digest, so the pin resolves on
+    every platform the scaffold lists. A digest taken after a `--platform`
+    pull is one architecture and fails on the other.
+    """
+    hub = hub_ref(tag)
+    argv = [
+        "docker", "buildx", "imagetools", "inspect",
+        "--format", "{{.Manifest.Digest}}",
+        hub,
+    ]
+    try:
+        completed = subprocess.run(argv, check=False, capture_output=True, text=True)
+    except OSError as exc:
+        raise ToolError(f"cannot read digest of {hub}: {exc.strerror or exc}") from exc
+    digest = completed.stdout.strip()
+    if completed.returncode != 0 or not DIGEST_RE.fullmatch(digest):
+        detail = (completed.stderr or completed.stdout).strip()
+        message = f"cannot read digest of {hub}"
+        if detail:
+            message = f"{message}\n{detail}"
+        raise ToolError(message)
+    return digest
+
+
+def _manifest(base: Base, challenge_id: str, title: str, author: str, from_digest: str) -> dict:
     """Scaffold of the challenge's manifest."""
     flag = {
         "id":       "flag",
@@ -79,8 +113,10 @@ def _manifest(base: Base, challenge_id: str, title: str, author: str) -> dict:
     member = {
         "name": base.member,
         "build": {
-            "context":   f"{context_root}/{base.member}",
+            "context":    f"{context_root}/{base.member}",
             "dockerfile": "Dockerfile",
+            # The catalog base tag. A later edit of the Dockerfile tag needs a new digest.
+            "fromDigest": from_digest,
         },
         "image": {
             "name": challenge_image_name(
@@ -175,8 +211,9 @@ def create_challenge(
     base_name:          str,
     challenge_id:       str,
     dest:               Path,
-    title:              str     | None = None,
-    author:             str            = "author",
+    title:              str                  | None = None,
+    author:             str                         = "author",
+    digest_for:         Callable[[str], str] | None = None,
 ) -> Path:
     # ensure the slug is valid, author should ensure the slug is available
     if not ID_RE.fullmatch(challenge_id):
@@ -188,6 +225,10 @@ def create_challenge(
     base = require_template(base_name)
     dest = dest.expanduser().resolve()
     ensure_new_dir(dest)
+    # Resolve the digest before creating the tree, so a hub failure leaves no partial directory.
+    digest = (digest_for or base_digest)(base.image)
+    if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+        raise ToolError(f"base digest must be sha256:<64 hex> (got {digest!r})")
     if base.runtime == "scenario":
         context = dest / "hosts" / base.member
     else:
@@ -199,7 +240,7 @@ def create_challenge(
     (dest / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
     (dest / "challenge.yaml").write_text(
         yaml.safe_dump(
-            _manifest(base, challenge_id, title or challenge_id, author),
+            _manifest(base, challenge_id, title or challenge_id, author, digest),
             sort_keys=False,
             default_flow_style=False,
         ),

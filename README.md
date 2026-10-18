@@ -2,7 +2,7 @@
 
 Command-line toolkit for authoring [HunterGround](https://hunterground.io) challenges and contests. It scaffolds a tree from a base image, lints `challenge.yaml`, builds and runs the challenge locally, checks a solver, and pushes the record to the platform.
 
-Python 3.11 or newer. `build` and `run` need Docker.
+Python 3.11 or newer. Scaffold reads the base digest through Docker. `build` and `run` need Docker.
 
 ```sh
 pip install -e .
@@ -20,19 +20,20 @@ hg challenge scaffold --base web-nginx --id web-xss-01 --dest ../web-xss-01
 cd ../web-xss-01
 ```
 
-Scaffold writes `challenge.yaml` (`spawn: image`, `state: hidden`), a Dockerfile that `FROM`s the base through a build-arg, `private/writeup.md`, and `private/solve.sh`. `--base` accepts `web-nginx` or `base/web-nginx`.
+Scaffold writes `challenge.yaml` (`spawn: image`, `state: hidden`), a Dockerfile that `FROM`s the base through a build-arg, `private/writeup.md`, and `private/solve.sh`. It fills `build.fromDigest` with the base image's manifest-list digest. `--base` accepts `web-nginx` or `base/web-nginx`.
 
-Edit the app, replace the writeup and solver stubs, then check it locally:
+Edit the app, replace the writeup and solver stubs, then check it locally. [docs/examples/challenge.md](docs/examples/challenge.md) walks through a Flask challenge from scaffold to `verify`.
 
 ```sh
 hg challenge lint
 hg challenge build
 hg challenge run
+hg challenge status
 hg challenge solve
 hg challenge stop
 ```
 
-`lint` checks the tree against the schema. Unknown keys fail. `build` tags `challenges/<category>/<id>:local` (for example `challenges/web/web-xss-01:local`) and pulls a missing base from Docker Hub under the `hunterground` org. `run` binds published ports on `127.0.0.1`, generates each dynamic flag as `hg{` plus 32 hex characters, and prints the player connection. `solve` runs `scripts.test` against that graph. `stop` removes the containers and keeps the image. `clean` removes the `:local` tag as well.
+`lint` checks the tree against the schema. Unknown keys fail. `build` tags `challenges/<category>/<id>:local` (for example `challenges/web/web-xss-01:local`) and pulls a missing base from Docker Hub under the `hunterground` org. `run` binds published ports on `127.0.0.1`, generates each dynamic flag as `hg{` plus 32 hex characters, and prints the player connection. `status` reports whether each container is running, the published port, and the connection recorded by `run`. It exits non-zero when the graph is not fully up. A static challenge reports `static`. `solve` runs `scripts.test` against that graph. `stop` removes the containers and keeps the image. `clean` removes the `:local` tag as well.
 
 `verify` is the check CI runs: strict lint, build, run, solver, then cleanup.
 
@@ -40,7 +41,7 @@ hg challenge stop
 hg challenge verify
 ```
 
-`--strict` also requires `build.fromDigest`, a writeup and solver that are not the scaffold stubs, and a `metadata.id` that matches `main` once `main` has one. `hg challenge digest` prints the canonical `sha256:` of the manifest.
+`--strict` requires the `build.fromDigest` scaffold wrote, a writeup and solver that are not the scaffold stubs, and a `metadata.id` that matches `main` once `main` has one. `hg challenge digest` prints the canonical `sha256:` of the manifest.
 
 ### Manifest
 
@@ -77,7 +78,7 @@ spec:
       build:
         context: services/web
         dockerfile: Dockerfile
-        fromDigest: sha256:…   # required by lint --strict
+        fromDigest: sha256:…   # pinned by scaffold; required by lint --strict
       image:
         name: challenges/web/web-xss-01
       ports:
@@ -102,7 +103,7 @@ spec:
     connection: "{url}"     # {url} {host} {port} {user}
 ```
 
-`container` is one image or a small set. `scenario` is one or more guests (the scaffold base is `range/debian`). `static` has no Docker graph: players download `spec.files` and submit a `static` or `regex` flag.
+`container` is one image or a small set. `scenario` is multi-daemon image (the scaffold base is `range/debian`). `static` has no Docker graph: players download `spec.files` and submit a `static` or `regex` flag. [docs/examples/static-challenge.md](docs/examples/static-challenge.md) walks through a handout whose flag is the string in the manifest.
 
 `spawn: image` keeps `services` and `networks` in the manifest. `spawn: compose` keeps the graph in `compose.yaml` and omits those keys. The player port is a label on the service, `hg.port.http: "5000"`, and `player.entry` is still `web.http`.
 
@@ -132,7 +133,7 @@ Read the flag from the service the way a player would. Use `CHALLENGE_FLAG_FLAG`
 
 ## Author a contest
 
-A contest is one `contest.yaml` plus one directory per challenge. Every child directory that holds a `challenge.yaml` is included. `spec.challenges` is optional and only sets order, points, and a local visibility preview.
+A contest is one `contest.yaml` plus one directory per challenge. Every child directory that holds a `challenge.yaml` is included. `spec.challenges` is optional and only sets order, points, and a local visibility preview. [docs/examples/contest.md](docs/examples/contest.md) walks through an `open` contest that contains one challenge.
 
 ```sh
 hg contest scaffold --id spring-2026 --title "Spring 2026" --type open \

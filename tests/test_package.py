@@ -8,9 +8,11 @@ wheel install has no dependency on the base-images repo layout.
 """
 
 from pathlib    import Path
+import re
 import subprocess
 import sys
 import pytest
+import yaml
 
 TOOLKIT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,6 +63,9 @@ def test_wheel_install_is_standalone(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert (challenge_dir / "services" / "web" / "Dockerfile").is_file()
+    manifest = yaml.safe_load((challenge_dir / "challenge.yaml").read_text(encoding="utf-8"))
+    digest = manifest["spec"]["services"][0]["build"]["fromDigest"]
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
 
     # hg challenge lint loads the schema through importlib.resources.
     result = _run([str(hg), "challenge", "lint", "--path", str(challenge_dir)], tmp_path)
