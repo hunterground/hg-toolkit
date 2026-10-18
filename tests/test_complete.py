@@ -5,7 +5,7 @@
 """
 
 from pathlib        import Path
-from hg.catalog     import HUB_NAMESPACE, templates
+from hg.catalog     import CATEGORIES, HUB_NAMESPACE, scaffold_bases
 from hg.cli         import build_parser, main
 from hg.complete    import (
     SHELLS,
@@ -46,6 +46,7 @@ def test_every_command_is_offered():
 
 def test_a_group_offers_its_subcommands_and_nothing_else():
     assert _answers(["hg", "bases"], "") == ["list", "pull", "remove", "clean"]
+    assert _answers(["hg", "images"], "") == ["list", "push"]
     assert _answers(["hg", "contest"], "") == [
         "create", "add-challenge", "publish", "scaffold", "lint", "digest", "challenges", "deploy",
     ]
@@ -92,8 +93,15 @@ def test_base_completer_offers_the_documented_short_forms():
     offered = _answers(["hg", "challenge", "scaffold", "--base"], "")
     assert "web-nginx" in offered
     assert "debian" in offered
+    assert "none" in offered
     assert "base/web-nginx" not in offered
-    assert offered == templates()
+    assert offered == scaffold_bases()
+
+def test_category_completer_offers_platform_categories():
+    offered = _answers(["hg", "challenge", "scaffold", "--category"], "")
+    assert offered == sorted(CATEGORIES)
+    assert _answers(["hg", "challenge", "scaffold", "--category"], "for") == ["forensic"]
+
 
 def test_base_completer_filters_by_what_is_typed():
     assert _answers(["hg", "challenge", "scaffold", "--base"], "web-ng") == ["web-nginx"]

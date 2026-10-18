@@ -187,6 +187,33 @@ def test_lint_accepts_a_label_difficulty(tmp_path):
     assert lint_challenge(root) == []
 
 
+def test_lint_accepts_a_published_image_pin(tmp_path):
+    root = _scaffold(tmp_path)
+    manifest = _manifest(root)
+    image = manifest["spec"]["services"][0]["image"]
+    image["registry"] = "ada/challenges-web-web-xss-01"
+    image["digest"] = "sha256:" + ("ab" * 32)
+    _write_manifest(root, manifest)
+    assert lint_challenge(root) == []
+
+
+def test_lint_rejects_a_half_written_image_pin(tmp_path):
+    root = _scaffold(tmp_path)
+    manifest = _manifest(root)
+    image = manifest["spec"]["services"][0]["image"]
+    image["registry"] = "ada/challenges-web-web-xss-01"
+    _write_manifest(root, manifest)
+    errors = lint_challenge(root)
+    assert any("image.registry and image.digest" in error for error in errors)
+
+    manifest = _manifest(root)
+    del manifest["spec"]["services"][0]["image"]["registry"]
+    manifest["spec"]["services"][0]["image"]["digest"] = "sha256:" + ("ab" * 32)
+    _write_manifest(root, manifest)
+    errors = lint_challenge(root)
+    assert any("image.registry and image.digest" in error for error in errors)
+
+
 def test_lint_rejects_a_difficulty_out_of_range(tmp_path):
     root = _scaffold(tmp_path)
     for value in (0, 11):

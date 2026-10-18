@@ -1,12 +1,20 @@
 """
 Challenge Scaffolder
-Write a challenge tree from a catalog base.
+Write a challenge tree from a catalog base, or a static handout when the base is none.
 """
 
 from collections.abc        import Callable
 from importlib.resources    import as_file, files
 from pathlib                import Path
-from hg.catalog             import ID_HINT, ID_RE, Base, challenge_image_name, hub_ref, require_template
+from hg.catalog             import (
+    CATEGORIES,
+    ID_HINT,
+    ID_RE,
+    Base,
+    challenge_image_name,
+    hub_ref,
+    require_template,
+)
 from hg.errors              import ToolError
 import re
 import shutil
@@ -28,6 +36,27 @@ SOLVE_SH = """#!/bin/sh
 echo "solve.sh is a stub" >&2
 exit 1
 """
+
+# A static challenge has no running graph, so the stub must not mention the
+# connection variables the container solver receives.
+STATIC_SOLVE_SH = """#!/bin/sh
+# Replace this stub. It must print the flag to stdout.
+# A static challenge has no host, port, or connection.
+echo "solve.sh is a stub" >&2
+exit 1
+"""
+
+# Placeholder the static manifest and the handout share until the author edits both.
+FLAG_CONTENT = "hg{replace-me}"
+
+BUILD_SH = f"""#!/bin/sh
+set -eu
+mkdir -p dist
+printf '%s\\n' 'Replace this handout. The flag is {FLAG_CONTENT}.' > dist/handout.txt
+"""
+
+# Sentinel for a challenge with no instance. It is not a catalog base.
+NONE = "none"
 
 # Same shape the schema requires for build.fromDigest.
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -192,6 +221,49 @@ def _manifest(base: Base, challenge_id: str, title: str, author: str, from_diges
     }
 
 
+def _static_manifest(challenge_id: str, title: str, author: str, category: str) -> dict:
+    """Scaffold of a challenge that has no instance."""
+    return {
+        "apiVersion": "hg.challenge/v1",
+        "kind":       "Challenge",
+        "metadata": {
+            "id":           challenge_id,
+            "title":        title,
+            "category":     category,
+            "description":  "Replace this description.",
+            "difficulty":   3,
+            "author":       author,
+            "value":        100,
+            "state":        "hidden",
+            "version":      "1",
+        },
+        "spec": {
+            "runtime": "static",
+            "flags": [
+                {"id": "flag", "type": "static", "content": FLAG_CONTENT},
+            ],
+            "scripts": {"test": "private/solve.sh", "build": "private/build.sh"},
+            "files":   [{"name": "handout.txt", "source": "build"}],
+        },
+    }
+
+
+def _write_tree(dest: Path, manifest: dict, solve_text: str) -> Path:
+    dest.mkdir(parents=True, exist_ok=True)
+    private = dest / "private"
+    private.mkdir()
+    (dest / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
+    (dest / "challenge.yaml").write_text(
+        yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    (private / "writeup.md").write_text(WRITEUP, encoding="utf-8")
+    solve = private / "solve.sh"
+    solve.write_text(solve_text, encoding="utf-8")
+    solve.chmod(0o755)
+    return private
+
+
 def _copy_template(template: str, dest: Path) -> None:
     source = files("hg") / "templates" / template
     if not source.is_dir():
@@ -208,19 +280,43 @@ def _copy_template(template: str, dest: Path) -> None:
 
 ## Main Functions --------------------------------------------------------------
 def create_challenge(
-    base_name:          str,
-    challenge_id:       str,
-    dest:               Path,
+    base_name:          str                         = NONE,
+    challenge_id:       str                  | None = None,
+    dest:               Path                 | None = None,
     title:              str                  | None = None,
     author:             str                         = "author",
+    category:           str                  | None = None,
     digest_for:         Callable[[str], str] | None = None,
 ) -> Path:
     # ensure the slug is valid, author should ensure the slug is available
+    if challenge_id is None or dest is None:
+        raise ToolError("id and destination are required")
     if not ID_RE.fullmatch(challenge_id):
         raise ToolError(
             f"id must match {ID_HINT} "
             f"(got {challenge_id!r})"
         )
+
+    if base_name == NONE:
+        if category is None:
+            raise ToolError("category is required when the base is none")
+        if category not in CATEGORIES:
+            known = ", ".join(sorted(CATEGORIES))
+            raise ToolError(f"category {category!r} is not on the platform ({known})")
+        dest = dest.expanduser().resolve()
+        ensure_new_dir(dest)
+        private = _write_tree(
+            dest,
+            _static_manifest(challenge_id, title or challenge_id, author, category),
+            STATIC_SOLVE_SH,
+        )
+        build = private / "build.sh"
+        build.write_text(BUILD_SH, encoding="utf-8")
+        build.chmod(0o755)
+        return dest
+
+    if category is not None:
+        raise ToolError("category is set by the base")
 
     base = require_template(base_name)
     dest = dest.expanduser().resolve()
@@ -234,21 +330,10 @@ def create_challenge(
     else:
         context = dest / "services" / base.member
 
-    dest.mkdir(parents=True, exist_ok=True)
-    private = dest / "private"
-    private.mkdir()
-    (dest / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
-    (dest / "challenge.yaml").write_text(
-        yaml.safe_dump(
-            _manifest(base, challenge_id, title or challenge_id, author, digest),
-            sort_keys=False,
-            default_flow_style=False,
-        ),
-        encoding="utf-8",
+    _write_tree(
+        dest,
+        _manifest(base, challenge_id, title or challenge_id, author, digest),
+        SOLVE_SH,
     )
-    (private / "writeup.md").write_text(WRITEUP, encoding="utf-8")
-    solve = private / "solve.sh"
-    solve.write_text(SOLVE_SH, encoding="utf-8")
-    solve.chmod(0o755)
     _copy_template(base.template or "", context)
     return dest

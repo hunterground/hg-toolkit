@@ -11,7 +11,15 @@ from dataclasses        import asdict
 from pathlib            import Path
 from hg.api             import Session
 from hg.build           import build_challenge
-from hg.catalog         import base_names, base_rows, builder_names, builder_rows, templates
+from hg.catalog         import (
+    CATEGORIES, 
+    base_names, 
+    base_rows, 
+    builder_names, 
+    builder_rows, 
+    scaffold_bases,
+    templates,
+)
 from hg.clean           import clean_challenge
 from hg.pull            import pull_bases, pull_builders
 from hg.remove          import (
@@ -45,6 +53,7 @@ from hg.contest         import (
 from hg.digest          import digest_challenge
 from hg.errors          import ToolError
 from hg.help            import error_body, humanize, render, terminal_width
+from hg.images          import list_images, push_images
 from hg.lint            import challenge_root, lint_challenge
 from hg.remote          import (
     add_challenge,
@@ -451,6 +460,28 @@ def _cmd_builders_clean(_args: argparse.Namespace) -> None:
     _finish_remove(clean_builders)
 
 
+def _cmd_images_list(args: argparse.Namespace) -> None:
+    root = challenge_root(Path(args.path) if args.path else None)
+    rows = list_images(root)
+    style.table(
+        [
+            (
+                style.value(row.member),
+                style.value(row.local) if row.present else style.dim(row.local),
+                style.value(row.reference) if row.reference else style.dim("-"),
+            )
+            for row in rows
+        ],
+        header = ("MEMBER", "LOCAL", "REFERENCE"),
+    )
+
+
+def _cmd_images_push(args: argparse.Namespace) -> None:
+    root = challenge_root(Path(args.path) if args.path else None)
+    for item in push_images(root, args.namespace):
+        style.say(style.dim(item.member), "  ", style.value(item.reference))
+
+
 def _cmd_scaffold(args: argparse.Namespace) -> None:
     dest = create_challenge(
         base_name    = args.base,
@@ -458,6 +489,7 @@ def _cmd_scaffold(args: argparse.Namespace) -> None:
         dest         = Path(args.dest),
         title        = args.title,
         author       = args.author,
+        category     = args.category,
     )
     style.ok("created ", style.value(dest))
 
@@ -910,6 +942,40 @@ def build_parser() -> _HelpParser:
     )
     builders_clean.set_defaults(func=_cmd_builders_clean)
 
+    ## hg images
+    images = sub.add_parser(
+        "images",
+        help    = "List or push challenge images",
+        summary = "List or push challenge images to the author's public registry.",
+        example = "hg images push --namespace xathrya",
+        section = "Images",
+    )
+    images_sub = images.add_subparsers(dest="images_command", required=True)
+
+    ## hg images list
+    images_list = images_sub.add_parser(
+        "list",
+        help    = "List built challenge images",
+        summary = "List each built image, its local tag, and the published reference.",
+        example = "hg images list",
+    )
+    _flag(images_list, "--path", completer=directories, help=_CHALLENGE_PATH)
+    images_list.set_defaults(func=_cmd_images_list)
+
+    ## hg images push
+    images_push = images_sub.add_parser(
+        "push",
+        help    = "Push built challenge images to the public registry",
+        summary = "Push built images and record their registry digests.",
+        example = "hg images push --namespace xathrya",
+    )
+    _flag(images_push, "--path", completer=directories, help=_CHALLENGE_PATH)
+    images_push.add_argument(
+        "--namespace",
+        help = "Docker Hub user or org. Defaults to HG_REGISTRY",
+    )
+    images_push.set_defaults(func=_cmd_images_push)
+
     ## hg challenge
     challenge = sub.add_parser(
         "challenge",
@@ -924,13 +990,15 @@ def build_parser() -> _HelpParser:
     scaffold = challenge_sub.add_parser(
         "scaffold",
         help    = "Write a new challenge tree",
-        summary = "Write a new challenge tree from a base image and pin its digest.",
+        summary = "Write a new challenge tree. The default has no instance.",
         example = "hg challenge scaffold --base web-nginx --id web-xss-01 --dest ../web-xss-01",
         section = "Author",
     )
-    _flag(scaffold, "--base", required=True, completer=templates(),
-          help = "Base with a template, such as web-nginx or range/debian")
+    _flag(scaffold, "--base", default="none", completer=scaffold_bases(),
+          help = "Base with a template, such as web-nginx or range/debian. Defaults to none")
     scaffold.add_argument("--id",     required=True,    help="Challenge id, stored as metadata.id")
+    _flag(scaffold, "--category", completer=sorted(CATEGORIES),
+          help = "Platform category. Required when --base is none")
     _flag(scaffold, "--dest", required=True, completer=directories, help="Directory to create")
     scaffold.add_argument("--title",                    help="Challenge title. Defaults to the id")
     scaffold.add_argument("--author", default="author", help="Author name. Defaults to author")

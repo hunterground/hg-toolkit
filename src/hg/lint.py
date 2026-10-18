@@ -11,7 +11,7 @@ from jsonschema.exceptions  import ValidationError
 from hg.catalog             import MEMBER_RE, base_for_image, challenge_image_name
 from hg.compose             import DIGEST_IMAGE, http_host, load_compose, parse_services
 from hg.errors              import ToolError
-from hg.scaffold            import SOLVE_SH, WRITEUP
+from hg.scaffold            import SOLVE_SH, STATIC_SOLVE_SH, WRITEUP
 import json
 import re
 import subprocess
@@ -356,6 +356,28 @@ def _check_built_member(
     expected_image = challenge_image_name(category, challenge_id, name, multiple=multiple)
     if image.get("name") != expected_image:
         errors.append(f"image.name must be {expected_image!r} (got {image.get('name')!r})")
+    _check_published_pin(member, errors)
+
+
+def _check_published_pin(member: dict, errors: list[str]) -> None:
+    """A built member may pin the public image beside its build."""
+    image = member.get("image") if isinstance(member.get("image"), dict) else {}
+    has_registry = "registry" in image
+    has_digest = "digest" in image
+    if has_registry == has_digest:
+        if not has_registry:
+            return
+        registry = image.get("registry")
+        digest   = image.get("digest")
+        if not isinstance(registry, str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)+",
+            registry,
+        ):
+            errors.append(f"{member.get('name')} image.registry must be a public repository name")
+        if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            errors.append(f"{member.get('name')} image.digest must be sha256:<64 hex>")
+        return
+    errors.append(f"{member.get('name')} needs both image.registry and image.digest")
 
 
 def _check_sidecar(member: dict, errors: list[str]) -> None:
@@ -591,28 +613,32 @@ def _check_users(
 
 
 def _check_compose_users(
-    compose: dict,
-    services: list,
-    errors: list[str],
+    compose:    dict,
+    services:   list,
+    errors:     list[str],
 ) -> None:
     """Validate ``spec.compose.users`` keyed by compose service name."""
     users = compose.get("users")
     if not isinstance(users, dict):
         return
+
     names = {service.name for service in services}
     for service, entries in users.items():
         if service not in names:
             errors.append(f"spec.compose.users[{service!r}] is not a compose service")
             continue
+
         if not isinstance(entries, list):
             errors.append(f"spec.compose.users[{service!r}] must be an array")
             continue
+
         seen: set[str] = set()
         for index, user in enumerate(entries):
             label = f"spec.compose.users[{service!r}][{index}]"
             if not isinstance(user, dict):
                 errors.append(f"{label} must be a mapping")
                 continue
+
             name = user.get("name")
             if isinstance(name, str):
                 if name in seen:
@@ -632,15 +658,18 @@ def _check_files(root: Path, spec: dict, errors: list[str]) -> None:
     files = spec.get("files") or []
     if not isinstance(files, list):
         return
+
     needs_build = False
     for index, item in enumerate(files):
         if not isinstance(item, dict):
             continue
+
         source = item.get("source")
         if source == "staging" and not re.fullmatch(r"[0-9a-f]{64}", item.get("sha256") or ""):
             errors.append(f"spec.files[{index}] source staging requires sha256")
         if source == "build":
             needs_build = True
+
     if needs_build:
         if "build" not in (spec.get("scripts") or {}):
             errors.append("scripts.build is required when a file source is build")
@@ -653,40 +682,40 @@ def _check_files(root: Path, spec: dict, errors: list[str]) -> None:
 
 
 def _lint_image_members(
-    root: Path,
-    spec: dict,
-    members: list[dict],
+    root:           Path,
+    spec:           dict,
+    members:        list[dict],
     *,
-    context_root: str,
-    runtime: str,
-    category: str,
-    challenge_id: str,
-    errors: list[str],
+    context_root:        str,
+    runtime:             str,
+    category:            str,
+    challenge_id:        str,
+    errors:         list[str],
 ) -> None:
     if spec.get("compose"):
         errors.append("spawn image must not set spec.compose")
     if (root / "compose.yaml").is_file():
         errors.append("spawn image must not include compose.yaml")
-    built = [member for member in members if isinstance(member.get("build"), dict)]
+
+    built    = [member for member in members if isinstance(member.get("build"), dict)]
     multiple = len(built) > 1
-    names = {member.get("name") for member in members if isinstance(member.get("name"), str)}
+    names    = {member.get("name") for member in members if isinstance(member.get("name"), str)}
     if len(names) != len(members):
         errors.append("member names must be unique")
+
     for member in members:
-        has_build = isinstance(member.get("build"), dict)
+        has_build  = isinstance(member.get("build"), dict)
         has_digest = isinstance(member.get("image"), dict) and "digest" in member.get("image", {})
-        if has_build and has_digest:
-            errors.append(f"{member.get('name')} must not set both build and image.digest")
         if has_build:
             _check_built_member(
                 root,
                 spec,
                 member,
-                context_root=context_root,
-                multiple=multiple,
-                category=category,
-                challenge_id=challenge_id,
-                errors=errors,
+                context_root = context_root,
+                multiple     = multiple,
+                category     = category,
+                challenge_id = challenge_id,
+                errors       = errors,
             )
         elif has_digest:
             _check_sidecar(member, errors)
@@ -704,48 +733,57 @@ def _lint_image_members(
 
 
 def _lint_compose(
-    root: Path,
-    spec: dict,
+    root:           Path,
+    spec:           dict,
     *,
-    category: str,
-    challenge_id: str,
-    errors: list[str],
+    category:            str,
+    challenge_id:        str,
+    errors:         list[str],
 ) -> None:
     if spec.get("services") or spec.get("hosts") or spec.get("networks"):
         errors.append("spawn compose must not set services, hosts, or networks")
+
     compose = spec.get("compose") if isinstance(spec.get("compose"), dict) else {}
-    rel = compose.get("file") or "compose.yaml"
+    rel  = compose.get("file") or "compose.yaml"
     path = _relative_inside(root, rel)
     if path is None:
         errors.append(f"compose file {rel!r} must stay inside the challenge root")
         return
+
     if "private" in Path(rel).parts:
         errors.append("compose file must not be under private/")
         return
+
     if not path.is_file():
         errors.append(f"compose file not found: {rel}")
         return
+
     try:
         document = load_compose(path)
     except ToolError as exc:
         errors.append(str(exc))
         return
+
     services, parse_errors = parse_services(document)
     errors.extend(parse_errors)
     if not services:
         return
-    built = [service for service in services if service.built]
+
+    built    = [service for service in services if service.built]
     multiple = len(built) > 1
-    names = {service.name for service in services}
+    names    = {service.name for service in services}
     for service in services:
         if not MEMBER_RE.fullmatch(service.name):
             errors.append(f"compose service {service.name!r} must match {MEMBER_RE.pattern}")
+
         for key, value in service.environment.items():
             if key in ("FLAGS", "USERS"):
                 errors.append(f"compose service {service.name} env must not set {key}")
+
             host = http_host(value)
             if host is not None and host not in names:
                 errors.append(f"compose service {service.name} env host {host!r} is not a member")
+
         if service.built:
             context = _relative_inside(root, service.build_context or "")
             if context is None or "private" in Path(service.build_context or "").parts:
@@ -753,10 +791,12 @@ def _lint_compose(
                     f"compose service {service.name} build context must stay inside the challenge root"
                 )
                 continue
+
             dockerfile = (context / service.dockerfile).resolve()
             if not _is_inside(dockerfile, context):
                 errors.append(f"compose service {service.name} dockerfile must stay inside the context")
                 continue
+
             info = _check_dockerfile(
                 root,
                 dockerfile,
@@ -770,7 +810,7 @@ def _lint_compose(
                 category,
                 challenge_id,
                 service.name,
-                multiple=multiple,
+                multiple = multiple,
             )
             if service.image != expected:
                 errors.append(
@@ -791,15 +831,18 @@ def _check_compose_player(spec: dict, services: list, errors: list[str]) -> None
     if not isinstance(player, dict):
         errors.append("spec.player is required")
         return
+
     entry = player.get("entry")
     if not isinstance(entry, str) or "." not in entry:
         errors.append("spec.player.entry must be <member>.<port>")
         return
+
     member_name, port_name = entry.split(".", 1)
     service = next((item for item in services if item.name == member_name), None)
     if service is None:
         errors.append(f"spec.player.entry service {member_name!r} is not in this challenge")
         return
+
     published = service.port_labels.get(port_name)
     if published is None:
         errors.append(
@@ -807,11 +850,13 @@ def _check_compose_player(spec: dict, services: list, errors: list[str]) -> None
         )
     elif published not in service.published:
         errors.append(f"spec.player.entry port {port_name!r} is not published on {member_name}")
+
     connection = player.get("connection")
     if not isinstance(connection, str) or not connection:
         errors.append("spec.player.connection is required")
         return
-    tokens = set(_TOKEN.findall(connection))
+
+    tokens  = set(_TOKEN.findall(connection))
     unknown = tokens - _CONNECTION_TOKENS
     if unknown:
         errors.append(f"spec.player.connection has unknown tokens {sorted(unknown)}")
@@ -823,9 +868,9 @@ def _git(root: Path, args: list[str]) -> str | None:
     try:
         completed = subprocess.run(
             ["git", "-C", str(root), *args],
-            check=False,
-            capture_output=True,
-            text=True,
+            check = False,
+            text  = True,
+            capture_output = True,
         )
     except OSError:
         return None
@@ -838,10 +883,12 @@ def _manifest_rel(root: Path) -> str | None:
     top = _git(root, ["rev-parse", "--show-toplevel"])
     if top is None:
         return None
+
     try:
         rel = root.resolve().relative_to(Path(top.strip()).resolve())
     except ValueError:
         return None
+
     if rel == Path("."):
         return MANIFEST_NAME
     return f"{rel.as_posix()}/{MANIFEST_NAME}"
@@ -853,64 +900,79 @@ def _strict(root: Path, data: dict, errors: list[str]) -> None:
     writeup = root / "private" / "writeup.md"
     if writeup.is_file() and writeup.read_text(encoding="utf-8") == WRITEUP:
         errors.append("private/writeup.md is still the scaffold stub")
+
     solve = root / "private" / "solve.sh"
-    if solve.is_file() and solve.read_text(encoding="utf-8") == SOLVE_SH:
+    if solve.is_file() and solve.read_text(encoding="utf-8") in (SOLVE_SH, STATIC_SOLVE_SH):
         errors.append("private/solve.sh is still the scaffold stub")
+
     if runtime in ("container", "scenario") and spec.get("spawn") != "compose":
         for key in ("services", "hosts"):
             for member in _members(spec, key):
                 build = member.get("build")
                 if isinstance(build, dict) and "fromDigest" not in build:
                     errors.append(f"{member.get('name')} build.fromDigest is required")
+
     if spec.get("spawn") == "compose":
         compose = spec.get("compose") if isinstance(spec.get("compose"), dict) else {}
         digests = compose.get("fromDigest") if isinstance(compose.get("fromDigest"), dict) else {}
-        rel = compose.get("file") or "compose.yaml"
+        rel  = compose.get("file") or "compose.yaml"
         path = _relative_inside(root, rel)
         if path is not None and path.is_file():
             try:
                 services, _parse_errors = parse_services(load_compose(path))
             except ToolError:
                 services = []
+
             for service in services:
                 if service.built and service.name not in digests:
                     errors.append(f"compose service {service.name} fromDigest is required")
+
     tracked = _git(root, ["ls-files", "--", "dist"])
     if tracked and tracked.strip():
         errors.append("dist/ bytes are tracked in git")
+
     for item in spec.get("files") or []:
         if not isinstance(item, dict):
             continue
+
         name = item.get("name")
         if not isinstance(name, str):
             continue
+
         listed = _git(root, ["ls-files", "--", name, f"dist/{name}"])
         if listed and listed.strip():
             errors.append(f"player file {name} is tracked in git")
+
     rel_manifest = _manifest_rel(root)
     if rel_manifest is None:
         return
+
     main_text = _git(root, ["show", f"main:{rel_manifest}"])
     if not main_text:
         return
+
     try:
         main_data = yaml.safe_load(main_text)
     except yaml.YAMLError:
         return
+
     if not isinstance(main_data, dict):
         return
+
     main_meta = main_data.get("metadata") if isinstance(main_data.get("metadata"), dict) else {}
-    main_id = main_meta.get("id")
+    main_id   = main_meta.get("id")
     if isinstance(main_id, str) and main_id != data["metadata"].get("id"):
         errors.append(f"metadata.id must stay {main_id!r} once main has an id")
     if data["metadata"].get("state") != "visible":
         return
+
     diff = _git(
         root,
         ["diff", "--name-only", "main", "--", "services", "hosts", "compose.yaml"],
     )
     if diff and diff.strip():
         errors.append("state visible cannot change services, hosts, or compose.yaml")
+
     main_spec = main_data.get("spec") if isinstance(main_data.get("spec"), dict) else {}
     if main_spec.get("files") != spec.get("files"):
         errors.append("state visible cannot change spec.files")
@@ -918,16 +980,18 @@ def _strict(root: Path, data: dict, errors: list[str]) -> None:
 
 def _semantic(root: Path, data: dict) -> list[str]:
     errors: list[str] = []
-    metadata = data["metadata"]
-    challenge_id = metadata["id"]
-    category = metadata["category"]
-    spec = data["spec"]
-    runtime = spec.get("runtime")
-    spawn = spec.get("spawn")
     if not (root / "private" / "writeup.md").is_file():
         errors.append("private/writeup.md is missing")
+
+    metadata     = data["metadata"]
+    challenge_id = metadata["id"]
+    category     = metadata["category"]
+    spec         = data["spec"]
+    runtime      = spec.get("runtime")
+    spawn        = spec.get("spawn")
+
     scripts = spec.get("scripts") if isinstance(spec.get("scripts"), dict) else {}
-    test = scripts.get("test")
+    test    = scripts.get("test")
     if isinstance(test, str):
         _check_script(root, test, "scripts.test", errors)
     _check_files(root, spec, errors)
@@ -947,6 +1011,7 @@ def _semantic(root: Path, data: dict) -> list[str]:
             errors.append("scenario spawn must be image")
         if spec.get("services"):
             errors.append("scenario runtime has no services")
+
         hosts = _members(spec, "hosts")
         if not hosts:
             errors.append("scenario runtime requires hosts")
@@ -955,11 +1020,11 @@ def _semantic(root: Path, data: dict) -> list[str]:
                 root,
                 spec,
                 hosts,
-                context_root="hosts",
-                runtime="scenario",
-                category=category,
-                challenge_id=challenge_id,
-                errors=errors,
+                context_root = "hosts",
+                runtime      = "scenario",
+                category     = category,
+                challenge_id = challenge_id,
+                errors       = errors,
             )
         return errors
 
@@ -975,11 +1040,12 @@ def _semantic(root: Path, data: dict) -> list[str]:
         _lint_compose(
             root,
             spec,
-            category=category,
-            challenge_id=challenge_id,
-            errors=errors,
+            category     = category,
+            challenge_id = challenge_id,
+            errors       = errors,
         )
         return errors
+
     services = _members(spec, "services")
     if not services:
         errors.append("container runtime requires services")
@@ -997,6 +1063,7 @@ def _semantic(root: Path, data: dict) -> list[str]:
     return errors
 
 
+## Main Functions ----------------------------------------------------------------------------------
 def lint_challenge(root: Path, *, strict: bool = False) -> list[str]:
     try:
         data = load_manifest(root)

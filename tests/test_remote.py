@@ -502,6 +502,20 @@ def test_difficulty_override_wins_over_the_manifest(tmp_path):
     assert challenge_body(root, difficulty=2)["difficulty"] == 2
 
 
+def test_push_uses_the_public_registry_pin(tmp_path):
+    root = tmp_path / "chall"
+    spec = _service_spec()
+    spec["services"][0]["image"] = {
+        "name": "challenges/web/web-xss-01",
+        "registry": "ada/challenges-web-web-xss-01",
+        "digest": DIGEST,
+    }
+    _write_manifest(root, spec)
+    assert challenge_body(root)["docker_image"] == f"ada/challenges-web-web-xss-01@{DIGEST}"
+    override = f"other/challenges-web-web-xss-01@{DIGEST}"
+    assert challenge_body(root, image=override)["docker_image"] == override
+
+
 def test_compose_entry_image(tmp_path):
     root = tmp_path / "chall"
     spec = {

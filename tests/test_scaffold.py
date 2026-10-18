@@ -235,6 +235,66 @@ def test_scaffold_refuses_a_non_empty_dest(tmp_path):
         create_challenge("web-nginx", "web-xss-01", dest)
 
 
+def test_scaffold_static_omits_the_image_tree(tmp_path, monkeypatch):
+    def fail(_tag):
+        raise ToolError("cannot read digest")
+
+    monkeypatch.setattr("hg.scaffold.base_digest", fail)
+    omitted = create_challenge(
+        challenge_id = "forensic-note-01",
+        dest         = tmp_path / "omitted",
+        category     = "forensic",
+    )
+    explicit = create_challenge("none", "note-explicit-01", tmp_path / "explicit", category="crypto")
+
+    for dest, category in ((omitted, "forensic"), (explicit, "crypto")):
+        assert not (dest / "services").exists()
+        assert not (dest / "hosts").exists()
+        assert lint_challenge(dest) == []
+        manifest = yaml.safe_load((dest / "challenge.yaml").read_text(encoding="utf-8"))
+        assert manifest["metadata"]["category"] == category
+        assert manifest["metadata"]["state"] == "hidden"
+        assert manifest["spec"]["runtime"] == "static"
+        assert "spawn" not in manifest["spec"]
+        assert manifest["spec"]["flags"] == [
+            {"id": "flag", "type": "static", "content": "hg{replace-me}"},
+        ]
+        assert manifest["spec"]["files"] == [{"name": "handout.txt", "source": "build"}]
+        solve = (dest / "private" / "solve.sh").read_text(encoding="utf-8")
+        assert "CHALLENGE_HOST" not in solve
+        assert "CHALLENGE_PORT" not in solve
+        assert "CHALLENGE_CONNECTION" not in solve
+        build = dest / "private" / "build.sh"
+        assert stat.S_IMODE(build.stat().st_mode) & stat.S_IXUSR
+        assert "hg{replace-me}" in build.read_text(encoding="utf-8")
+        errors = lint_challenge(dest, strict=True)
+        assert any("writeup.md" in error for error in errors)
+        assert any("solve.sh" in error for error in errors)
+
+
+def test_scaffold_static_requires_a_category(tmp_path):
+    dest = tmp_path / "out"
+    with pytest.raises(ToolError, match="category is required"):
+        create_challenge(challenge_id="forensic-note-01", dest=dest)
+    with pytest.raises(ToolError, match="category is required"):
+        create_challenge("none", "forensic-note-01", dest)
+    assert not dest.exists()
+
+
+def test_scaffold_static_refuses_an_unknown_category(tmp_path):
+    dest = tmp_path / "out"
+    with pytest.raises(ToolError, match="not on the platform"):
+        create_challenge("none", "forensic-note-01", dest, category="misc")
+    assert not dest.exists()
+
+
+def test_scaffold_refuses_a_category_on_an_image_base(tmp_path):
+    dest = tmp_path / "out"
+    with pytest.raises(ToolError, match="set by the base"):
+        create_challenge("web-nginx", "web-xss-01", dest, category="web")
+    assert not dest.exists()
+
+
 def test_scaffold_refuses_a_dest_inside_the_repo():
     root = repo_root()
     if root is None:

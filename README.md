@@ -2,7 +2,7 @@
 
 Command-line toolkit for authoring [HunterGround](https://hunterground.io) challenges and contests. It scaffolds a tree from a base image, lints `challenge.yaml`, builds and runs the challenge locally, checks a solver, and pushes the record to the platform.
 
-Python 3.11 or newer. Scaffold reads the base digest through Docker. `build` and `run` need Docker.
+Python 3.11 or newer. An image scaffold reads the base digest through Docker. `build` and `run` need Docker for a container or scenario.
 
 ```sh
 pip install -e .
@@ -20,7 +20,7 @@ hg challenge scaffold --base web-nginx --id web-xss-01 --dest ../web-xss-01
 cd ../web-xss-01
 ```
 
-Scaffold writes `challenge.yaml` (`spawn: image`, `state: hidden`), a Dockerfile that `FROM`s the base through a build-arg, `private/writeup.md`, and `private/solve.sh`. It fills `build.fromDigest` with the base image's manifest-list digest. `--base` accepts `web-nginx` or `base/web-nginx`.
+Scaffold writes `challenge.yaml` (`spawn: image`, `state: hidden`), a Dockerfile that `FROM`s the base through a build-arg, `private/writeup.md`, and `private/solve.sh`. It fills `build.fromDigest` with the base image's manifest-list digest. `--base` accepts `web-nginx` or `base/web-nginx`. Omitting `--base` writes a static challenge with no instance and needs `--category`.
 
 Edit the app, replace the writeup and solver stubs, then check it locally. [docs/examples/challenge.md](docs/examples/challenge.md) walks through a Flask challenge from scaffold to `verify`.
 
@@ -56,7 +56,7 @@ metadata:
   category: web             # web, reversing, pwn, forensic, crypto, osint, mobile, blockchain
   description: Can you get the admin bot to load your page?
   difficulty: 3             # 1..10, or easy | medium | hard
-  author: ada
+  author: xathrya
   value: 100
   state: hidden             # hidden | visible
   version: "1"
@@ -169,14 +169,18 @@ spec:
 Staff commands talk to `https://hntr-backend.archonlabs.id`. Set `HG_API_URL` for another host. The password is prompted and is not stored. Tokens go into the OS keychain.
 
 ```sh
+docker login
+hg images push --namespace <dockerhub-user>
 hg login --email staff@example.com
 hg whoami
 
-hg challenge push --image registry.example/challenges/web/web-xss-01@sha256:…
+hg challenge push
 hg contest deploy --path ../spring-2026
 ```
 
-`push` creates or updates the catalogue record. It does not `docker push`. It sends one flag, the image and port from `player.entry`, and `private/writeup.md` once that file is no longer the scaffold stub. A new challenge stays a draft unless you pass `--publish`. `deploy` creates or updates the contest, pushes each challenge, uploads handouts built into `dist/`, and publishes the contest when `visibility: published`.
+`hg images push` tags the `:local` image as `<dockerhub-user>/challenges-<category>-<id>:<version>`, pushes it with the current Docker login, and writes `image.registry` and `image.digest`. The Hub repository must be public. `hg challenge build` tags the host architecture, so publish that image only when the platform nodes run the same one.
+
+`hg challenge push` creates or updates the catalogue record. It does not upload the image again. It sends `image.registry@image.digest`, one flag, the port from `player.entry`, and `private/writeup.md` once that file is no longer the scaffold stub. A new challenge stays a draft unless you pass `--publish`. `deploy` creates or updates the contest, pushes each challenge, uploads handouts built into `dist/`, and publishes the contest when `visibility: published`. It reads the pin `hg images push` wrote.
 
 A contest built from challenges already on the platform:
 
@@ -186,6 +190,10 @@ hg contest create --type private-competition --slug acme-2026 --title "Acme 2026
 hg contest add-challenge acme-2026 web-xss-01 --points 250
 hg contest publish acme-2026
 ```
+
+## Images
+
+`hg images list` prints each built member, its `:local` tag, and `registry@digest` once `hg images push` has recorded both. `hg images push --namespace <dockerhub-user>` publishes those images. `HG_REGISTRY` supplies the namespace when `--namespace` is omitted. Docker credentials stay in the Docker config; this command does not log in.
 
 ## Bases
 

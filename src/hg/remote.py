@@ -4,6 +4,7 @@ from datetime       import datetime
 from pathlib        import Path
 from urllib.parse   import quote
 from hg.api         import Client, NotFound
+from hg.catalog     import CATEGORIES
 from hg.compose     import load_compose, parse_services
 from hg.errors      import ToolError
 from hg.lint        import load_manifest
@@ -13,10 +14,6 @@ import re
 import uuid
 import zipfile
 
-# Backend categories. misc and range are local-only.
-CATEGORIES = frozenset(
-    {"web", "reversing", "pwn", "forensic", "crypto", "osint", "mobile", "blockchain"}
-)
 DIFFICULTY       = {"easy": 3, "medium": 6, "hard": 9}
 FLAG_TEMPLATE    = "hg{%random%}"
 MAX_UPLOAD_BYTES = 25 << 20
@@ -147,8 +144,9 @@ def _entry_instance(root: Path, spec: dict, image: str | None) -> tuple[int, str
     image_info = member.get("image") if isinstance(member.get("image"), dict) else {}
     ref = registry_image(
         override = image,
-        name     = image_info.get("name") if isinstance(image_info.get("name"), str) else None,
-        digest   = image_info.get("digest") if isinstance(image_info.get("digest"), str) else None,
+        name     = image_info.get("name")     if isinstance(image_info.get("name"), str)     else None,
+        digest   = image_info.get("digest")   if isinstance(image_info.get("digest"), str)   else None,
+        registry = image_info.get("registry") if isinstance(image_info.get("registry"), str) else None,
     )
     return port["container"], protocol, ref
 
@@ -745,9 +743,21 @@ def encode_multipart(name: str, data: bytes, content_type: str) -> tuple[bytes, 
     return body, f"multipart/form-data; boundary={boundary}"
 
 
-def registry_image(*, override: str | None, name: str | None, digest: str | None) -> str:
+def registry_image(
+    *,
+    override:       str | None,
+    name:           str | None,
+    digest:         str | None,
+    registry:       str | None = None,
+) -> str:
     if override is not None and override.strip():
         return _require_registry(override.strip(), "--image")
+    if isinstance(registry, str) and registry.strip():
+        if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
+            raise ToolError("image.digest must be sha256:<64 hex>")
+        if _tag(registry) == "local":
+            raise ToolError("refusing :local image tag; pass --image with a registry reference")
+        return _require_registry(f"{registry.strip()}@{digest}", "image.registry")
     if isinstance(name, str) and _tag(name) == "local":
         raise ToolError("refusing :local image tag; pass --image with a registry reference")
     if isinstance(name, str) and isinstance(digest, str) and digest:
@@ -761,6 +771,6 @@ def registry_image(*, override: str | None, name: str | None, digest: str | None
             raise ToolError("refusing :local image tag; pass --image with a registry reference")
         return name
     raise ToolError(
-        "pass --image with a registry reference, or set image.name and image.digest on the player entry"
+        "pass --image with a registry reference, or set image.registry and image.digest on the player entry"
     )
 

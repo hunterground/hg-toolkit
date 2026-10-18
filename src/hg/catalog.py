@@ -21,6 +21,11 @@ PLATFORMS = ("linux/amd64", "linux/arm64")
 # Docker Hub org that publishes these images.
 HUB_NAMESPACE = "hunterground"
 
+# Backend categories. misc and range are local-only.
+CATEGORIES = frozenset(
+    {"web", "reversing", "pwn", "forensic", "crypto", "osint", "mobile", "blockchain"}
+)
+
 
 ## Definitions -----------------------------------------------------------------
 @dataclass(frozen=True)
@@ -406,12 +411,18 @@ def base_names() -> list[str]:
 
 def templates() -> list[str]:
     """
-    The names ``hg challenge scaffold --base`` accepts.
+    Short names of bases that have a scaffold template.
 
-    Only a base with a template can scaffold a tree, and `scaffold` refuses the
-    rest before writing, so the shell offers the same list.
+    Only a base with a template can scaffold an image tree, and `scaffold`
+    refuses the rest before writing. ``none`` is not a base; ``scaffold_bases``
+    adds it for the scaffold flag.
     """
     return _short_names(base for base in BASES if base.template)
+
+
+def scaffold_bases() -> list[str]:
+    """The names ``hg challenge scaffold --base`` accepts, including ``none``."""
+    return sorted((*templates(), "none"))
 
 def base_rows() -> list[tuple[str, str, str, str]]:
     """
